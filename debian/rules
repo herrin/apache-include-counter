@@ -50,7 +50,7 @@ install: build
 	mkdir -p $(INS)$(LIBEXECDIR)
 	mkdir -p $(INS)/etc/apache2/mods-available/
 	install --mode=644 c/mod_include_counter.so ${INS}$(LIBEXECDIR)/mod_include_counter.so
-	install include-counter.load ${INS}/etc/apache2/mods-available/include-counter.load
+	install include_counter.load ${INS}/etc/apache2/mods-available/include_counter.load
 
 	#$(MAKE) prefix=`pwd`/debian/tmp/usr install
 
