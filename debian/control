@@ -1,0 +1,14 @@
+Source: apache-include-counter
+Section: net
+Priority: extra
+Maintainer: Bill Herrin <herrin@dirtside.com>
+Build-Depends: debhelper (>= 7.0.50~), libapr1-dev, libaprutil1-dev, apache2-dev (>=2.4)
+Standards-Version: 3.8.4
+
+Package: apache-include-counter
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, apache2 (>=2.4)
+Description: server side includes w/ hit counter mod
+  A replacement for stock Apache server side includes which contains
+  a flexible page hit counter module
+

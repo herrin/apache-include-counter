@@ -1,0 +1,1224 @@
+--- mod_include.c	2023-03-25 12:14:15.757178178 -0700
++++ mod_include_counter.c	2023-03-25 12:27:25.359265745 -0700
+@@ -38,8 +38,9 @@
+ #include "http_main.h"
+ #include "util_script.h"
+ #include "http_core.h"
+-#include "mod_include.h"
++#include "mod_include_counter.h"
+ #include "ap_expr.h"
++#include "apr_tables.h" /* apr_table_get */
+ 
+ /* helper for Latin1 <-> entity encoding */
+ #if APR_CHARSET_EBCDIC
+@@ -50,6 +51,8 @@
+ #define RAW_ASCII_CHAR(ch)  (ch)
+ #endif /* !APR_CHARSET_EBCDIC */
+ 
++#include "counter.h"
++
+ 
+ /*
+  * +-------------------------------------------------------+
+@@ -120,12 +123,12 @@
+     signed char lastmodified;
+     signed char etag;
+     signed char legacy_expr;
+-} include_dir_config;
++} include_counter_dir_config;
+ 
+ typedef struct {
+     const char *default_start_tag;
+     const char *default_end_tag;
+-} include_server_config;
++} include_counter_server_config;
+ 
+ /* main parser states */
+ typedef enum {
+@@ -233,7 +236,7 @@
+     (name)->dump_done = 0;                                \
+ } while(0)
+ 
+-static void debug_printf(include_ctx_t *ctx, const char *fmt, ...)
++static void debug_printf(include_counter_ctx_t *ctx, const char *fmt, ...)
+ {
+     va_list ap;
+     char *debug__str;
+@@ -273,7 +276,7 @@
+     }                                                                        \
+ }
+ 
+-static void debug_dump_tree(include_ctx_t *ctx, parse_node_t *root)
++static void debug_dump_tree(include_counter_ctx_t *ctx, parse_node_t *root)
+ {
+     parse_node_t *current;
+     char *is;
+@@ -412,7 +415,7 @@
+ 
+ #define DEBUG_DUMP_COND(ctx, text)                                 \
+     DEBUG_PRINTF(((ctx), "**** %s cond status=\"%c\"\n", (text),   \
+-                  ((ctx)->flags & SSI_FLAG_COND_TRUE) ? '1' : '0'))
++                  ((ctx)->flags & SSIC_FLAG_COND_TRUE) ? '1' : '0'))
+ 
+ #define DEBUG_DUMP_TREE(ctx, root) debug_dump_tree(ctx, root)
+ 
+@@ -446,13 +449,13 @@
+  */
+ 
+ /* global module structure */
+-module AP_MODULE_DECLARE_DATA include_module;
++module AP_MODULE_DECLARE_DATA include_counter_module;
+ 
+ /* function handlers for include directives */
+-static apr_hash_t *include_handlers;
++static apr_hash_t *include_counter_handlers;
+ 
+ /* forward declaration of handler registry */
+-static APR_OPTIONAL_FN_TYPE(ap_register_include_handler) *ssi_pfn_register;
++static APR_OPTIONAL_FN_TYPE(ap_register_include_counter_handler) *ssi_pfn_register;
+ 
+ /* Sentinel value to store in subprocess_env for items that
+  * shouldn't be evaluated until/unless they're actually used
+@@ -589,7 +592,7 @@
+     *p = '\0';
+ }
+ 
+-static void add_include_vars(request_rec *r)
++static void add_include_counter_vars(request_rec *r)
+ {
+     apr_table_t *e = r->subprocess_env;
+     char *t;
+@@ -618,7 +621,7 @@
+     }
+ }
+ 
+-static const char *add_include_vars_lazy(request_rec *r, const char *var, const char *timefmt)
++static const char *add_include_counter_vars_lazy(request_rec *r, const char *var, const char *timefmt)
+ {
+     char *val;
+     if (!strcasecmp(var, "DATE_LOCAL")) {
+@@ -645,7 +648,7 @@
+     return val;
+ }
+ 
+-static const char *get_include_var(const char *var, include_ctx_t *ctx)
++static const char *get_include_counter_var(const char *var, include_counter_ctx_t *ctx)
+ {
+     const char *val;
+     request_rec *r = ctx->r;
+@@ -684,7 +687,7 @@
+         val = apr_table_get(r->subprocess_env, var);
+ 
+         if (val == LAZY_VALUE) {
+-            val = add_include_vars_lazy(r, var, ctx->time_str);
++            val = add_include_counter_vars_lazy(r, var, ctx->time_str);
+         }
+     }
+ 
+@@ -696,18 +699,18 @@
+                                        const char *arg)
+ {
+     const char *res, *name = data;
+-    include_ctx_t *ctx = eval_ctx->data;
++    include_counter_ctx_t *ctx = eval_ctx->data;
+     if ((name[0] == 'e') || (name[0] == 'E')) {
+         /* keep legacy "env" semantics */
+         if ((res = apr_table_get(ctx->r->notes, arg)) != NULL)
+             return res;
+-        else if ((res = get_include_var(arg, ctx)) != NULL)
++        else if ((res = get_include_counter_var(arg, ctx)) != NULL)
+             return res;
+         else
+             return getenv(arg);
+     }
+     else {
+-        return get_include_var(arg, ctx);
++        return get_include_counter_var(arg, ctx);
+     }
+ }
+ 
+@@ -739,7 +742,7 @@
+  * (Note: If out==NULL, this function allocs a buffer for the resulting
+  * string from ctx->pool. The return value is always the parsed string)
+  */
+-static char *ap_ssi_parse_string(include_ctx_t *ctx, const char *in, char *out,
++static char *ap_ssic_parse_string(include_counter_ctx_t *ctx, const char *in, char *out,
+                                  apr_size_t length, int leave_name)
+ {
+     request_rec *r = ctx->r;
+@@ -864,7 +867,7 @@
+                 }
+             }
+             else {
+-                const char *val = get_include_var(key, ctx);
++                const char *val = get_include_counter_var(key, ctx);
+                 apr_size_t len = 0;
+ 
+                 if (val) {
+@@ -960,7 +963,7 @@
+  * +-------------------------------------------------------+
+  */
+ 
+-static APR_INLINE int re_check(include_ctx_t *ctx, const char *string,
++static APR_INLINE int re_check(include_counter_ctx_t *ctx, const char *string,
+                                const char *rexp)
+ {
+     ap_regex_t *compiled;
+@@ -987,7 +990,7 @@
+     return re->have_match;
+ }
+ 
+-static int get_ptoken(include_ctx_t *ctx, const char **parse, token_t *token, token_t *previous)
++static int get_ptoken(include_counter_ctx_t *ctx, const char **parse, token_t *token, token_t *previous)
+ {
+     const char *p;
+     apr_size_t shift;
+@@ -1164,7 +1167,7 @@
+     return unmatched;
+ }
+ 
+-static int parse_expr(include_ctx_t *ctx, const char *expr, int *was_error)
++static int parse_expr(include_counter_ctx_t *ctx, const char *expr, int *was_error)
+ {
+     parse_node_t *new, *root = NULL, *current = NULL;
+     request_rec *r = ctx->r;
+@@ -1378,7 +1381,7 @@
+         switch (current->token.type) {
+         case TOKEN_STRING:
+             current->token.value =
+-                ap_ssi_parse_string(ctx, current->token.value, NULL, 0,
++                ap_ssic_parse_string(ctx, current->token.value, NULL, 0,
+                                     SSI_EXPAND_DROP_NAME);
+             current->value = !!*current->token.value;
+             break;
+@@ -1397,7 +1400,7 @@
+                 switch (current->left->token.type) {
+                 case TOKEN_STRING:
+                     current->left->token.value =
+-                        ap_ssi_parse_string(ctx, current->left->token.value,
++                        ap_ssic_parse_string(ctx, current->left->token.value,
+                                             NULL, 0, SSI_EXPAND_DROP_NAME);
+                     current->left->value = !!*current->left->token.value;
+                     DEBUG_DUMP_EVAL(ctx, current->left);
+@@ -1421,7 +1424,7 @@
+                     switch (current->right->token.type) {
+                     case TOKEN_STRING:
+                         current->right->token.value =
+-                            ap_ssi_parse_string(ctx,current->right->token.value,
++                            ap_ssic_parse_string(ctx,current->right->token.value,
+                                                 NULL, 0, SSI_EXPAND_DROP_NAME);
+                         current->right->value = !!*current->right->token.value;
+                         DEBUG_DUMP_EVAL(ctx, current->right);
+@@ -1458,10 +1461,10 @@
+                 return 0;
+             }
+             current->left->token.value =
+-                ap_ssi_parse_string(ctx, current->left->token.value, NULL, 0,
++                ap_ssic_parse_string(ctx, current->left->token.value, NULL, 0,
+                                     SSI_EXPAND_DROP_NAME);
+             current->right->token.value =
+-                ap_ssi_parse_string(ctx, current->right->token.value, NULL, 0,
++                ap_ssic_parse_string(ctx, current->right->token.value, NULL, 0,
+                                     SSI_EXPAND_DROP_NAME);
+ 
+             if (current->right->token.type == TOKEN_RE) {
+@@ -1494,10 +1497,10 @@
+             }
+ 
+             current->left->token.value =
+-                ap_ssi_parse_string(ctx, current->left->token.value, NULL, 0,
++                ap_ssic_parse_string(ctx, current->left->token.value, NULL, 0,
+                                     SSI_EXPAND_DROP_NAME);
+             current->right->token.value =
+-                ap_ssi_parse_string(ctx, current->right->token.value, NULL, 0,
++                ap_ssic_parse_string(ctx, current->right->token.value, NULL, 0,
+                                     SSI_EXPAND_DROP_NAME);
+ 
+             current->value = strcmp(current->left->token.value,
+@@ -1541,7 +1544,7 @@
+                 return 0;
+             }
+             current->right->token.value =
+-                ap_ssi_parse_string(ctx, current->right->token.value, NULL, 0,
++                ap_ssic_parse_string(ctx, current->right->token.value, NULL, 0,
+                                     SSI_EXPAND_DROP_NAME);
+             rr = ap_sub_req_lookup_uri(current->right->token.value, r, NULL);
+             /* 400 and higher are considered access denied */
+@@ -1551,7 +1554,7 @@
+             else {
+                 current->value = 0;
+                 ap_log_rerror(APLOG_MARK, APLOG_DEBUG, rr->status, r, APLOGNO(01336)
+-                              "mod_include: The tested "
++                              "mod_include_counter: The tested "
+                               "subrequest -A \"%s\" returned an error code.",
+                               current->right->token.value);
+             }
+@@ -1587,7 +1590,7 @@
+ }
+ 
+ /* same as above, but use common ap_expr syntax / API */
+-static int parse_ap_expr(include_ctx_t *ctx, const char *expr, int *was_error)
++static int parse_ap_expr(include_counter_ctx_t *ctx, const char *expr, int *was_error)
+ {
+     ap_expr_info_t *expr_info = apr_pcalloc(ctx->pool, sizeof (*expr_info));
+     const char *err;
+@@ -1664,7 +1667,8 @@
+  * The tag value is html decoded if dodecode is non-zero.
+  * The tag value may be NULL if there is no tag value..
+  */
+-static void ap_ssi_get_tag_and_value(include_ctx_t *ctx, char **tag,
++/* static void ap_ssic_get_tag_and_value(include_counter_ctx_t *ctx, char **tag, */
++void ap_ssic_get_tag_and_value(include_counter_ctx_t *ctx, char **tag,
+                                      char **tag_val, int dodecode)
+ {
+     if (!ctx->intern->argv) {
+@@ -1766,7 +1770,7 @@
+ /*
+  * <!--#comment blah blah blah ... -->
+  */
+-static apr_status_t handle_comment(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_comment(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                    apr_bucket_brigade *bb)
+ {
+     return APR_SUCCESS;
+@@ -1781,7 +1785,7 @@
+  * virtual url. If onerror fails, or no onerror is present, the default
+  * error string is inserted into the stream.
+  */
+-static apr_status_t handle_include(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_include_counter(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                    apr_bucket_brigade *bb)
+ {
+     request_rec *r = f->r;
+@@ -1789,14 +1793,14 @@
+ 
+     if (!ctx->argc) {
+         ap_log_rerror(APLOG_MARK,
+-                      (ctx->flags & SSI_FLAG_PRINTING)
++                      (ctx->flags & SSIC_FLAG_PRINTING)
+                           ? APLOG_ERR : APLOG_WARNING,
+                       0, r, APLOGNO(01341)
+                       "missing argument for include element in %s",
+                       r->filename);
+     }
+ 
+-    if (!(ctx->flags & SSI_FLAG_PRINTING)) {
++    if (!(ctx->flags & SSIC_FLAG_PRINTING)) {
+         return APR_SUCCESS;
+     }
+ 
+@@ -1815,7 +1819,7 @@
+         apr_status_t rv = APR_SUCCESS;
+         int status = 0;
+ 
+-        ap_ssi_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_DECODED);
++        ap_ssic_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_DECODED);
+         if (!tag || !tag_val) {
+             break;
+         }
+@@ -1828,7 +1832,7 @@
+             break;
+         }
+ 
+-        parsed_string = ap_ssi_parse_string(ctx, tag_val, NULL, 0,
++        parsed_string = ap_ssic_parse_string(ctx, tag_val, NULL, 0,
+                                             SSI_EXPAND_DROP_NAME);
+         if (tag[0] == 'f') {
+             char *newpath;
+@@ -1862,19 +1866,19 @@
+             error_fmt = "unable to include \"%s\" in parsed file %s, subrequest setup returned %d";
+         }
+ 
+-        if (!error_fmt && (ctx->flags & SSI_FLAG_NO_EXEC) &&
++        if (!error_fmt && (ctx->flags & SSIC_FLAG_NO_EXEC) &&
+             rr->content_type && strncmp(rr->content_type, "text/", 5)) {
+ 
+             error_fmt = "unable to include potential exec \"%s\" in parsed "
+                         "file %s, content type not text/*";
+         }
+ 
+-        /* See the Kludge in includes_filter for why.
++        /* See the Kludge in includes_counter_filter for why.
+          * Basically, it puts a bread crumb in here, then looks
+          * for the crumb later to see if its been here.
+          */
+         if (rr) {
+-            ap_set_module_config(rr->request_config, &include_module, r);
++            ap_set_module_config(rr->request_config, &include_counter_module, r);
+         }
+ 
+         if (!error_fmt && ((status = ap_run_sub_req(rr)))) {
+@@ -1914,7 +1918,7 @@
+  * <!--#echo [decoding="..."] [encoding="..."] var="..." [decoding="..."]
+  *  [encoding="..."] var="..." ... -->
+  */
+-static apr_status_t handle_echo(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_echo(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                 apr_bucket_brigade *bb)
+ {
+     const char *encoding = "entity", *decoding = "none";
+@@ -1923,14 +1927,14 @@
+ 
+     if (!ctx->argc) {
+         ap_log_rerror(APLOG_MARK,
+-                      (ctx->flags & SSI_FLAG_PRINTING)
++                      (ctx->flags & SSIC_FLAG_PRINTING)
+                           ? APLOG_ERR : APLOG_WARNING,
+                       0, r, APLOGNO(01343)
+                       "missing argument for echo element in %s",
+                       r->filename);
+     }
+ 
+-    if (!(ctx->flags & SSI_FLAG_PRINTING)) {
++    if (!(ctx->flags & SSIC_FLAG_PRINTING)) {
+         return APR_SUCCESS;
+     }
+ 
+@@ -1943,7 +1947,7 @@
+         char *tag = NULL;
+         char *tag_val = NULL;
+ 
+-        ap_ssi_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_DECODED);
++        ap_ssic_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_DECODED);
+         if (!tag || !tag_val) {
+             break;
+         }
+@@ -1953,7 +1957,7 @@
+             const char *echo_text = NULL;
+             apr_size_t e_len;
+ 
+-            val = get_include_var(ap_ssi_parse_string(ctx, tag_val, NULL,
++            val = get_include_counter_var(ap_ssic_parse_string(ctx, tag_val, NULL,
+                                                       0, SSI_EXPAND_DROP_NAME),
+                                   ctx);
+ 
+@@ -2067,7 +2071,7 @@
+  * <!--#config [timefmt="..."] [sizefmt="..."] [errmsg="..."]
+  *             [echomsg="..."] -->
+  */
+-static apr_status_t handle_config(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_config(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                   apr_bucket_brigade *bb)
+ {
+     request_rec *r = f->r;
+@@ -2075,14 +2079,14 @@
+ 
+     if (!ctx->argc) {
+         ap_log_rerror(APLOG_MARK,
+-                      (ctx->flags & SSI_FLAG_PRINTING)
++                      (ctx->flags & SSIC_FLAG_PRINTING)
+                           ? APLOG_ERR : APLOG_WARNING,
+                       0, r, APLOGNO(01347)
+                       "missing argument for config element in %s",
+                       r->filename);
+     }
+ 
+-    if (!(ctx->flags & SSI_FLAG_PRINTING)) {
++    if (!(ctx->flags & SSIC_FLAG_PRINTING)) {
+         return APR_SUCCESS;
+     }
+ 
+@@ -2095,24 +2099,24 @@
+         char *tag     = NULL;
+         char *tag_val = NULL;
+ 
+-        ap_ssi_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_RAW);
++        ap_ssic_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_RAW);
+         if (!tag || !tag_val) {
+             break;
+         }
+ 
+         if (!strcmp(tag, "errmsg")) {
+-            ctx->error_str = ap_ssi_parse_string(ctx, tag_val, NULL, 0,
++            ctx->error_str = ap_ssic_parse_string(ctx, tag_val, NULL, 0,
+                                                  SSI_EXPAND_DROP_NAME);
+         }
+         else if (!strcmp(tag, "echomsg")) {
+             ctx->intern->undefined_echo =
+-                ap_ssi_parse_string(ctx, tag_val, NULL, 0,SSI_EXPAND_DROP_NAME);
++                ap_ssic_parse_string(ctx, tag_val, NULL, 0,SSI_EXPAND_DROP_NAME);
+             ctx->intern->undefined_echo_len=strlen(ctx->intern->undefined_echo);
+         }
+         else if (!strcmp(tag, "timefmt")) {
+             apr_time_t date = r->request_time;
+ 
+-            ctx->time_str = ap_ssi_parse_string(ctx, tag_val, NULL, 0,
++            ctx->time_str = ap_ssic_parse_string(ctx, tag_val, NULL, 0,
+                                                 SSI_EXPAND_DROP_NAME);
+ 
+             apr_table_setn(env, "DATE_LOCAL", ap_ht_time(r->pool, date,
+@@ -2126,13 +2130,13 @@
+         else if (!strcmp(tag, "sizefmt")) {
+             char *parsed_string;
+ 
+-            parsed_string = ap_ssi_parse_string(ctx, tag_val, NULL, 0,
++            parsed_string = ap_ssic_parse_string(ctx, tag_val, NULL, 0,
+                                                 SSI_EXPAND_DROP_NAME);
+             if (!strcmp(parsed_string, "bytes")) {
+-                ctx->flags |= SSI_FLAG_SIZE_IN_BYTES;
++                ctx->flags |= SSIC_FLAG_SIZE_IN_BYTES;
+             }
+             else if (!strcmp(parsed_string, "abbrev")) {
+-                ctx->flags &= SSI_FLAG_SIZE_ABBREV;
++                ctx->flags &= SSIC_FLAG_SIZE_ABBREV;
+             }
+             else {
+                 ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(01348) "unknown value "
+@@ -2156,21 +2160,21 @@
+ /*
+  * <!--#fsize virtual|file="..." [virtual|file="..."] ... -->
+  */
+-static apr_status_t handle_fsize(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_fsize(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                  apr_bucket_brigade *bb)
+ {
+     request_rec *r = f->r;
+ 
+     if (!ctx->argc) {
+         ap_log_rerror(APLOG_MARK,
+-                      (ctx->flags & SSI_FLAG_PRINTING)
++                      (ctx->flags & SSIC_FLAG_PRINTING)
+                           ? APLOG_ERR : APLOG_WARNING,
+                       0, r, APLOGNO(01350)
+                       "missing argument for fsize element in %s",
+                       r->filename);
+     }
+ 
+-    if (!(ctx->flags & SSI_FLAG_PRINTING)) {
++    if (!(ctx->flags & SSIC_FLAG_PRINTING)) {
+         return APR_SUCCESS;
+     }
+ 
+@@ -2185,19 +2189,19 @@
+         apr_finfo_t finfo;
+         char *parsed_string;
+ 
+-        ap_ssi_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_DECODED);
++        ap_ssic_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_DECODED);
+         if (!tag || !tag_val) {
+             break;
+         }
+ 
+-        parsed_string = ap_ssi_parse_string(ctx, tag_val, NULL, 0,
++        parsed_string = ap_ssic_parse_string(ctx, tag_val, NULL, 0,
+                                             SSI_EXPAND_DROP_NAME);
+ 
+         if (!find_file(r, "fsize", tag, parsed_string, &finfo)) {
+             char *buf;
+             apr_size_t len;
+ 
+-            if (!(ctx->flags & SSI_FLAG_SIZE_IN_BYTES)) {
++            if (!(ctx->flags & SSIC_FLAG_SIZE_IN_BYTES)) {
+                 buf = apr_strfsize(finfo.size, apr_palloc(ctx->pool, 5));
+                 len = 4; /* omit the \0 terminator */
+             }
+@@ -2244,21 +2248,21 @@
+ /*
+  * <!--#flastmod virtual|file="..." [virtual|file="..."] ... -->
+  */
+-static apr_status_t handle_flastmod(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_flastmod(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                     apr_bucket_brigade *bb)
+ {
+     request_rec *r = f->r;
+ 
+     if (!ctx->argc) {
+         ap_log_rerror(APLOG_MARK,
+-                      (ctx->flags & SSI_FLAG_PRINTING)
++                      (ctx->flags & SSIC_FLAG_PRINTING)
+                           ? APLOG_ERR : APLOG_WARNING,
+                       0, r, APLOGNO(01351)
+                       "missing argument for flastmod element in %s",
+                       r->filename);
+     }
+ 
+-    if (!(ctx->flags & SSI_FLAG_PRINTING)) {
++    if (!(ctx->flags & SSIC_FLAG_PRINTING)) {
+         return APR_SUCCESS;
+     }
+ 
+@@ -2273,12 +2277,12 @@
+         apr_finfo_t  finfo;
+         char *parsed_string;
+ 
+-        ap_ssi_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_DECODED);
++        ap_ssic_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_DECODED);
+         if (!tag || !tag_val) {
+             break;
+         }
+ 
+-        parsed_string = ap_ssi_parse_string(ctx, tag_val, NULL, 0,
++        parsed_string = ap_ssic_parse_string(ctx, tag_val, NULL, 0,
+                                             SSI_EXPAND_DROP_NAME);
+ 
+         if (!find_file(r, "flastmod", tag, parsed_string, &finfo)) {
+@@ -2303,7 +2307,7 @@
+ /*
+  * <!--#if expr="..." -->
+  */
+-static apr_status_t handle_if(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_if(include_counter_ctx_t *ctx, ap_filter_t *f,
+                               apr_bucket_brigade *bb)
+ {
+     char *tag = NULL;
+@@ -2313,7 +2317,7 @@
+ 
+     if (ctx->argc != 1) {
+         ap_log_rerror(APLOG_MARK,
+-                      (ctx->flags & SSI_FLAG_PRINTING)
++                      (ctx->flags & SSIC_FLAG_PRINTING)
+                           ? APLOG_ERR : APLOG_WARNING,
+                       0, r,
+                       (ctx->argc)
+@@ -2322,7 +2326,7 @@
+                       r->filename);
+     }
+ 
+-    if (!(ctx->flags & SSI_FLAG_PRINTING)) {
++    if (!(ctx->flags & SSIC_FLAG_PRINTING)) {
+         ++(ctx->if_nesting_level);
+         return APR_SUCCESS;
+     }
+@@ -2332,7 +2336,7 @@
+         return APR_SUCCESS;
+     }
+ 
+-    ap_ssi_get_tag_and_value(ctx, &tag, &expr, SSI_VALUE_RAW);
++    ap_ssic_get_tag_and_value(ctx, &tag, &expr, SSI_VALUE_RAW);
+ 
+     if (strcmp(tag, "expr")) {
+         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(01354) "unknown parameter \"%s\" "
+@@ -2361,10 +2365,10 @@
+     }
+ 
+     if (expr_ret) {
+-        ctx->flags |= (SSI_FLAG_PRINTING | SSI_FLAG_COND_TRUE);
++        ctx->flags |= (SSIC_FLAG_PRINTING | SSIC_FLAG_COND_TRUE);
+     }
+     else {
+-        ctx->flags &= SSI_FLAG_CLEAR_PRINT_COND;
++        ctx->flags &= SSIC_FLAG_CLEAR_PRINT_COND;
+     }
+ 
+     DEBUG_DUMP_COND(ctx, "   if");
+@@ -2377,7 +2381,7 @@
+ /*
+  * <!--#elif expr="..." -->
+  */
+-static apr_status_t handle_elif(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_elif(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                 apr_bucket_brigade *bb)
+ {
+     char *tag = NULL;
+@@ -2404,7 +2408,7 @@
+         return APR_SUCCESS;
+     }
+ 
+-    ap_ssi_get_tag_and_value(ctx, &tag, &expr, SSI_VALUE_RAW);
++    ap_ssic_get_tag_and_value(ctx, &tag, &expr, SSI_VALUE_RAW);
+ 
+     if (strcmp(tag, "expr")) {
+         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(01358) "unknown parameter \"%s\" "
+@@ -2423,8 +2427,8 @@
+     DEBUG_PRINTF((ctx, "****  elif expr=\"%s\"\n", expr));
+     DEBUG_DUMP_COND(ctx, " elif");
+ 
+-    if (ctx->flags & SSI_FLAG_COND_TRUE) {
+-        ctx->flags &= SSI_FLAG_CLEAR_PRINTING;
++    if (ctx->flags & SSIC_FLAG_COND_TRUE) {
++        ctx->flags &= SSIC_FLAG_CLEAR_PRINTING;
+         return APR_SUCCESS;
+     }
+ 
+@@ -2439,10 +2443,10 @@
+     }
+ 
+     if (expr_ret) {
+-        ctx->flags |= (SSI_FLAG_PRINTING | SSI_FLAG_COND_TRUE);
++        ctx->flags |= (SSIC_FLAG_PRINTING | SSIC_FLAG_COND_TRUE);
+     }
+     else {
+-        ctx->flags &= SSI_FLAG_CLEAR_PRINT_COND;
++        ctx->flags &= SSIC_FLAG_CLEAR_PRINT_COND;
+     }
+ 
+     DEBUG_DUMP_COND(ctx, " elif");
+@@ -2453,7 +2457,7 @@
+ /*
+  * <!--#else -->
+  */
+-static apr_status_t handle_else(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_else(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                 apr_bucket_brigade *bb)
+ {
+     request_rec *r = f->r;
+@@ -2471,7 +2475,7 @@
+     }
+ 
+     if (ctx->argc) {
+-        if (ctx->flags & SSI_FLAG_PRINTING) {
++        if (ctx->flags & SSIC_FLAG_PRINTING) {
+             SSI_CREATE_ERROR_BUCKET(ctx, f, bb);
+         }
+ 
+@@ -2480,11 +2484,11 @@
+ 
+     DEBUG_DUMP_COND(ctx, " else");
+ 
+-    if (ctx->flags & SSI_FLAG_COND_TRUE) {
+-        ctx->flags &= SSI_FLAG_CLEAR_PRINTING;
++    if (ctx->flags & SSIC_FLAG_COND_TRUE) {
++        ctx->flags &= SSIC_FLAG_CLEAR_PRINTING;
+     }
+     else {
+-        ctx->flags |= (SSI_FLAG_PRINTING | SSI_FLAG_COND_TRUE);
++        ctx->flags |= (SSIC_FLAG_PRINTING | SSIC_FLAG_COND_TRUE);
+     }
+ 
+     return APR_SUCCESS;
+@@ -2493,7 +2497,7 @@
+ /*
+  * <!--#endif -->
+  */
+-static apr_status_t handle_endif(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_endif(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                  apr_bucket_brigade *bb)
+ {
+     request_rec *r = f->r;
+@@ -2518,7 +2522,7 @@
+ 
+     DEBUG_DUMP_COND(ctx, "endif");
+ 
+-    ctx->flags |= (SSI_FLAG_PRINTING | SSI_FLAG_COND_TRUE);
++    ctx->flags |= (SSIC_FLAG_PRINTING | SSIC_FLAG_COND_TRUE);
+ 
+     return APR_SUCCESS;
+ }
+@@ -2526,7 +2530,7 @@
+ /*
+  * <!--#set var="..." value="..." ... -->
+  */
+-static apr_status_t handle_set(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_set(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                apr_bucket_brigade *bb)
+ {
+     const char *encoding = "none", *decoding = "none";
+@@ -2538,14 +2542,14 @@
+ 
+     if (ctx->argc < 2) {
+         ap_log_rerror(APLOG_MARK,
+-                      (ctx->flags & SSI_FLAG_PRINTING)
++                      (ctx->flags & SSIC_FLAG_PRINTING)
+                           ? APLOG_ERR : APLOG_WARNING,
+                       0, r,
+                       APLOGNO(01362) "missing argument for set element in %s",
+                       r->filename);
+     }
+ 
+-    if (!(ctx->flags & SSI_FLAG_PRINTING)) {
++    if (!(ctx->flags & SSIC_FLAG_PRINTING)) {
+         return APR_SUCCESS;
+     }
+ 
+@@ -2566,7 +2570,7 @@
+         char *tag = NULL;
+         char *tag_val = NULL;
+ 
+-        ap_ssi_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_RAW);
++        ap_ssic_get_tag_and_value(ctx, &tag, &tag_val, SSI_VALUE_RAW);
+ 
+         if (!tag || !tag_val) {
+             break;
+@@ -2574,7 +2578,7 @@
+ 
+         if (!strcmp(tag, "var")) {
+             decodehtml(tag_val);
+-            var = ap_ssi_parse_string(ctx, tag_val, NULL, 0,
++            var = ap_ssic_parse_string(ctx, tag_val, NULL, 0,
+                                       SSI_EXPAND_DROP_NAME);
+         }
+         else if (!strcmp(tag, "decoding")) {
+@@ -2594,7 +2598,7 @@
+                 break;
+             }
+ 
+-            parsed_string = ap_ssi_parse_string(ctx, tag_val, NULL, 0,
++            parsed_string = ap_ssic_parse_string(ctx, tag_val, NULL, 0,
+                                                 SSI_EXPAND_DROP_NAME);
+ 
+             if (parsed_string) {
+@@ -2692,7 +2696,7 @@
+ /*
+  * <!--#printenv -->
+  */
+-static apr_status_t handle_printenv(include_ctx_t *ctx, ap_filter_t *f,
++static apr_status_t handle_printenv(include_counter_ctx_t *ctx, ap_filter_t *f,
+                                     apr_bucket_brigade *bb)
+ {
+     request_rec *r = f->r;
+@@ -2702,14 +2706,14 @@
+ 
+     if (ctx->argc) {
+         ap_log_rerror(APLOG_MARK,
+-                      (ctx->flags & SSI_FLAG_PRINTING)
++                      (ctx->flags & SSIC_FLAG_PRINTING)
+                           ? APLOG_ERR : APLOG_WARNING,
+                       0, r,
+                       APLOGNO(01367) "printenv directive does not take tags in %s",
+                       r->filename);
+     }
+ 
+-    if (!(ctx->flags & SSI_FLAG_PRINTING)) {
++    if (!(ctx->flags & SSIC_FLAG_PRINTING)) {
+         return APR_SUCCESS;
+     }
+ 
+@@ -2730,7 +2734,7 @@
+         /* get value */
+         val_text = elts[i].val;
+         if (val_text == LAZY_VALUE)
+-            val_text = add_include_vars_lazy(r, elts[i].key, ctx->time_str);
++            val_text = add_include_counter_vars_lazy(r, elts[i].key, ctx->time_str);
+         val_text = ap_escape_html(ctx->dpool, val_text);
+ 
+         apr_brigade_putstrs(bb, NULL, NULL, key_text, "=", val_text, "\n",
+@@ -2835,7 +2839,7 @@
+  * returns the index position of the first byte of start_seq (or the len of
+  * the buffer as non-match)
+  */
+-static apr_size_t find_start_sequence(include_ctx_t *ctx, const char *data,
++static apr_size_t find_start_sequence(include_counter_ctx_t *ctx, const char *data,
+                                       apr_size_t len)
+ {
+     struct ssi_internal_ctx *intern = ctx->intern;
+@@ -2908,7 +2912,7 @@
+  * number of chars of the start_seq which appeared not to be part of a
+  * full tag and may have to be passed down the filter chain.
+  */
+-static apr_size_t find_partial_start_sequence(include_ctx_t *ctx,
++static apr_size_t find_partial_start_sequence(include_counter_ctx_t *ctx,
+                                               const char *data,
+                                               apr_size_t len,
+                                               apr_size_t *release)
+@@ -3004,7 +3008,7 @@
+ /*
+  * returns the position after the directive
+  */
+-static apr_size_t find_directive(include_ctx_t *ctx, const char *data,
++static apr_size_t find_directive(include_counter_ctx_t *ctx, const char *data,
+                                  apr_size_t len, char ***store,
+                                  apr_size_t **store_len)
+ {
+@@ -3104,7 +3108,7 @@
+ /*
+  * find out whether the next token is (a possible) end_seq or an argument
+  */
+-static apr_size_t find_arg_or_tail(include_ctx_t *ctx, const char *data,
++static apr_size_t find_arg_or_tail(include_counter_ctx_t *ctx, const char *data,
+                                    apr_size_t len)
+ {
+     struct ssi_internal_ctx *intern = ctx->intern;
+@@ -3128,7 +3132,7 @@
+  * test the stream for end_seq. If it doesn't match at all, it must be an
+  * argument
+  */
+-static apr_size_t find_tail(include_ctx_t *ctx, const char *data,
++static apr_size_t find_tail(include_counter_ctx_t *ctx, const char *data,
+                             apr_size_t len)
+ {
+     struct ssi_internal_ctx *intern = ctx->intern;
+@@ -3170,7 +3174,7 @@
+  * A pcre-pattern could look (similar to):
+  * name\s*(?:=\s*(["'`]?)value\1(?>\s*))?
+  */
+-static apr_size_t find_argument(include_ctx_t *ctx, const char *data,
++static apr_size_t find_argument(include_counter_ctx_t *ctx, const char *data,
+                                 apr_size_t len, char ***store,
+                                 apr_size_t **store_len)
+ {
+@@ -3387,7 +3391,7 @@
+  */
+ static apr_status_t send_parsed_content(ap_filter_t *f, apr_bucket_brigade *bb)
+ {
+-    include_ctx_t *ctx = f->ctx;
++    include_counter_ctx_t *ctx = f->ctx;
+     struct ssi_internal_ctx *intern = ctx->intern;
+     request_rec *r = f->r;
+     apr_bucket *b = APR_BRIGADE_FIRST(bb);
+@@ -3527,7 +3531,7 @@
+             }
+ 
+             newb = APR_BUCKET_NEXT(b);
+-            if (ctx->flags & SSI_FLAG_PRINTING) {
++            if (ctx->flags & SSIC_FLAG_PRINTING) {
+                 APR_BUCKET_REMOVE(b);
+                 APR_BRIGADE_INSERT_TAIL(pass_bb, b);
+             }
+@@ -3556,7 +3560,7 @@
+             index = find_partial_start_sequence(ctx, data, len, &release);
+ 
+             /* check if we mismatched earlier and have to release some chars */
+-            if (release && (ctx->flags & SSI_FLAG_PRINTING)) {
++            if (release && (ctx->flags & SSIC_FLAG_PRINTING)) {
+                 char *to_release = apr_pmemdup(ctx->pool, intern->start_seq, release);
+ 
+                 newb = apr_bucket_pool_create(to_release, release, ctx->pool,
+@@ -3700,16 +3704,16 @@
+         case PARSE_EXECUTE:
+             /* if there was an error, it was already logged; just stop here */
+             if (intern->error) {
+-                if (ctx->flags & SSI_FLAG_PRINTING) {
++                if (ctx->flags & SSIC_FLAG_PRINTING) {
+                     SSI_CREATE_ERROR_BUCKET(ctx, f, pass_bb);
+                     intern->error = 0;
+                 }
+             }
+             else {
+-                include_handler_fn_t *handle_func;
++                include_counter_handler_fn_t *handle_func;
+ 
+                 handle_func =
+-                    (include_handler_fn_t *)apr_hash_get(include_handlers, intern->directive,
++                    (include_counter_handler_fn_t *)apr_hash_get(include_counter_handlers, intern->directive,
+                                                          intern->directive_len);
+ 
+                 if (handle_func) {
+@@ -3726,7 +3730,7 @@
+                                   apr_pstrmemdup(r->pool, intern->directive,
+                                                  intern->directive_len),
+                                                  r->filename);
+-                    if (ctx->flags & SSI_FLAG_PRINTING) {
++                    if (ctx->flags & SSIC_FLAG_PRINTING) {
+                         SSI_CREATE_ERROR_BUCKET(ctx, f, pass_bb);
+                     }
+                 }
+@@ -3747,7 +3751,7 @@
+     /* End of stream. Final cleanup */
+     if (intern->seen_eos) {
+         if (PARSE_HEAD == intern->state) {
+-            if (ctx->flags & SSI_FLAG_PRINTING) {
++            if (ctx->flags & SSIC_FLAG_PRINTING) {
+                 char *to_release = apr_pmemdup(ctx->pool, intern->start_seq,
+                                                           intern->parse_pos);
+ 
+@@ -3761,12 +3765,12 @@
+             ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(01372)
+                           "SSI directive was not properly finished at the end "
+                           "of parsed document %s", r->filename);
+-            if (ctx->flags & SSI_FLAG_PRINTING) {
++            if (ctx->flags & SSIC_FLAG_PRINTING) {
+                 SSI_CREATE_ERROR_BUCKET(ctx, f, pass_bb);
+             }
+         }
+ 
+-        if (!(ctx->flags & SSI_FLAG_PRINTING)) {
++        if (!(ctx->flags & SSIC_FLAG_PRINTING)) {
+             ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, APLOGNO(01373)
+                           "missing closing endif directive in parsed document"
+                           " %s", r->filename);
+@@ -3800,10 +3804,10 @@
+  * +-------------------------------------------------------+
+  */
+ 
+-static int includes_setup(ap_filter_t *f)
++static int includes_counter_setup(ap_filter_t *f)
+ {
+-    include_dir_config *conf = ap_get_module_config(f->r->per_dir_config,
+-                                                    &include_module);
++    include_counter_dir_config *conf = ap_get_module_config(f->r->per_dir_config,
++                                                    &include_counter_module);
+ 
+     /* When our xbithack value isn't set to full or our platform isn't
+      * providing group-level protection bits or our group-level bits do not
+@@ -3827,19 +3831,19 @@
+     return OK;
+ }
+ 
+-static apr_status_t includes_filter(ap_filter_t *f, apr_bucket_brigade *b)
++static apr_status_t includes_counter_filter(ap_filter_t *f, apr_bucket_brigade *b)
+ {
+     request_rec *r = f->r;
+     request_rec *parent;
+-    include_dir_config *conf = ap_get_module_config(r->per_dir_config,
+-                                                    &include_module);
++    include_counter_dir_config *conf = ap_get_module_config(r->per_dir_config,
++                                                    &include_counter_module);
+ 
+-    include_server_config *sconf= ap_get_module_config(r->server->module_config,
+-                                                       &include_module);
++    include_counter_server_config *sconf= ap_get_module_config(r->server->module_config,
++                                                       &include_counter_module);
+ 
+     if (!(ap_allow_options(r) & OPT_INCLUDES)) {
+         ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, APLOGNO(01374)
+-                      "mod_include: Options +Includes (or IncludesNoExec) "
++                      "mod_include_counter: Options +Includes (or IncludesNoExec) "
+                       "wasn't set, INCLUDES filter removed: %s", r->uri);
+         ap_remove_output_filter(f);
+         return ap_pass_brigade(f->next, b);
+@@ -3847,7 +3851,7 @@
+ 
+     if (!f->ctx) {
+         struct ssi_internal_ctx *intern;
+-        include_ctx_t *ctx;
++        include_counter_ctx_t *ctx;
+ 
+         /* create context for this filter */
+         f->ctx = ctx = apr_palloc(r->pool, sizeof(*ctx));
+@@ -3861,9 +3865,9 @@
+         intern->tmp_bb = apr_brigade_create(ctx->pool, f->c->bucket_alloc);
+         intern->seen_eos = 0;
+         intern->state = PARSE_PRE_HEAD;
+-        ctx->flags = (SSI_FLAG_PRINTING | SSI_FLAG_COND_TRUE);
++        ctx->flags = (SSIC_FLAG_PRINTING | SSIC_FLAG_COND_TRUE);
+         if ((ap_allow_options(r) & OPT_INC_WITH_EXEC) == 0) {
+-            ctx->flags |= SSI_FLAG_NO_EXEC;
++            ctx->flags |= SSIC_FLAG_NO_EXEC;
+         }
+         intern->legacy_expr = (conf->legacy_expr > 0);
+         intern->expr_eval_ctx = NULL;
+@@ -3887,7 +3891,7 @@
+         intern->undefined_echo_len = strlen(intern->undefined_echo);
+     }
+ 
+-    if ((parent = ap_get_module_config(r->request_config, &include_module))) {
++    if ((parent = ap_get_module_config(r->request_config, &include_counter_module))) {
+         /* Kludge --- for nested includes, we want to keep the subprocess
+          * environment of the base document (for compatibility); that means
+          * torquing our own last_modified date as well so that the
+@@ -3903,7 +3907,7 @@
+          * environment */
+         ap_add_common_vars(r);
+         ap_add_cgi_vars(r);
+-        add_include_vars(r);
++        add_include_counter_vars(r);
+     }
+     /* Always unset the content-length.  There is no way to know if
+      * the content will be modified at some point by send_parsed_content.
+@@ -3967,7 +3971,7 @@
+     return send_parsed_content(f, b);
+ }
+ 
+-static int include_fixup(request_rec *r)
++static int include_counter_fixup(request_rec *r)
+ {
+     if (r->handler && (strcmp(r->handler, "server-parsed") == 0))
+     {
+@@ -3984,8 +3988,8 @@
+     }
+ #else
+     {
+-        include_dir_config *conf = ap_get_module_config(r->per_dir_config,
+-                                                        &include_module);
++        include_counter_dir_config *conf = ap_get_module_config(r->per_dir_config,
++                                                        &include_counter_module);
+ 
+         if (conf->xbithack == XBITHACK_OFF ||
+             (DEFAULT_XBITHACK == XBITHACK_OFF &&
+@@ -4020,9 +4024,9 @@
+  * +-------------------------------------------------------+
+  */
+ 
+-static void *create_includes_dir_config(apr_pool_t *p, char *dummy)
++static void *create_includes_counter_dir_config(apr_pool_t *p, char *dummy)
+ {
+-    include_dir_config *result = apr_pcalloc(p, sizeof(include_dir_config));
++    include_counter_dir_config *result = apr_pcalloc(p, sizeof(include_counter_dir_config));
+ 
+     result->xbithack          = XBITHACK_UNSET;
+     result->lastmodified      = UNSET;
+@@ -4035,9 +4039,9 @@
+ #define MERGE(b,o,n,val,unset) n->val = o->val != unset  ? o->val : b->val
+ static void *merge_includes_dir_config(apr_pool_t *p, void *basev, void *overridesv)
+ {
+-    include_dir_config *base = (include_dir_config *)basev,
+-                       *over = (include_dir_config *)overridesv,
+-                       *new  = apr_palloc(p, sizeof(include_dir_config));
++    include_counter_dir_config *base = (include_counter_dir_config *)basev,
++                       *over = (include_counter_dir_config *)overridesv,
++                       *new  = apr_palloc(p, sizeof(include_counter_dir_config));
+     MERGE(base, over, new, default_error_msg, NULL);
+     MERGE(base, over, new, default_time_fmt,  NULL);
+     MERGE(base, over, new, undefined_echo,    NULL);
+@@ -4048,11 +4052,11 @@
+     return new;
+ }
+ 
+-static void *create_includes_server_config(apr_pool_t *p, server_rec *server)
++static void *create_includes_counter_server_config(apr_pool_t *p, server_rec *server)
+ {
+-    include_server_config *result;
++    include_counter_server_config *result;
+ 
+-    result = apr_palloc(p, sizeof(include_server_config));
++    result = apr_palloc(p, sizeof(include_counter_server_config));
+     result->default_end_tag    = DEFAULT_END_SEQUENCE;
+     result->default_start_tag  = DEFAULT_START_SEQUENCE;
+ 
+@@ -4061,7 +4065,7 @@
+ 
+ static const char *set_xbithack(cmd_parms *cmd, void *mconfig, const char *arg)
+ {
+-    include_dir_config *conf = mconfig;
++    include_counter_dir_config *conf = mconfig;
+ 
+     if (!strcasecmp(arg, "off")) {
+         conf->xbithack = XBITHACK_OFF;
+@@ -4082,7 +4086,7 @@
+ static const char *set_default_start_tag(cmd_parms *cmd, void *mconfig,
+                                          const char *tag)
+ {
+-    include_server_config *conf;
++    include_counter_server_config *conf;
+     const char *p = tag;
+ 
+     /* be consistent. (See below in set_default_end_tag) */
+@@ -4093,7 +4097,7 @@
+         ++p;
+     }
+ 
+-    conf= ap_get_module_config(cmd->server->module_config , &include_module);
++    conf= ap_get_module_config(cmd->server->module_config , &include_counter_module);
+     conf->default_start_tag = tag;
+ 
+     return NULL;
+@@ -4102,7 +4106,7 @@
+ static const char *set_default_end_tag(cmd_parms *cmd, void *mconfig,
+                                        const char *tag)
+ {
+-    include_server_config *conf;
++    include_counter_server_config *conf;
+     const char *p = tag;
+ 
+     /* sanity check. The parser may fail otherwise */
+@@ -4113,7 +4117,7 @@
+         ++p;
+     }
+ 
+-    conf= ap_get_module_config(cmd->server->module_config , &include_module);
++    conf= ap_get_module_config(cmd->server->module_config , &include_counter_module);
+     conf->default_end_tag = tag;
+ 
+     return NULL;
+@@ -4122,7 +4126,7 @@
+ static const char *set_undefined_echo(cmd_parms *cmd, void *mconfig,
+                                       const char *msg)
+ {
+-    include_dir_config *conf = mconfig;
++    include_counter_dir_config *conf = mconfig;
+     conf->undefined_echo = msg;
+ 
+     return NULL;
+@@ -4131,7 +4135,7 @@
+ static const char *set_default_error_msg(cmd_parms *cmd, void *mconfig,
+                                          const char *msg)
+ {
+-    include_dir_config *conf = mconfig;
++    include_counter_dir_config *conf = mconfig;
+     conf->default_error_msg = msg;
+ 
+     return NULL;
+@@ -4140,7 +4144,7 @@
+ static const char *set_default_time_fmt(cmd_parms *cmd, void *mconfig,
+                                         const char *fmt)
+ {
+-    include_dir_config *conf = mconfig;
++    include_counter_dir_config *conf = mconfig;
+     conf->default_time_fmt = fmt;
+ 
+     return NULL;
+@@ -4155,12 +4159,12 @@
+  * +-------------------------------------------------------+
+  */
+ 
+-static int include_post_config(apr_pool_t *p, apr_pool_t *plog,
++static int include_counter_post_config(apr_pool_t *p, apr_pool_t *plog,
+                                apr_pool_t *ptemp, server_rec *s)
+ {
+-    include_handlers = apr_hash_make(p);
++    include_counter_handlers = apr_hash_make(p);
+ 
+-    ssi_pfn_register = APR_RETRIEVE_OPTIONAL_FN(ap_register_include_handler);
++    ssi_pfn_register = APR_RETRIEVE_OPTIONAL_FN(ap_register_include_counter_handler);
+ 
+     if (ssi_pfn_register) {
+         ssi_pfn_register("if", handle_if);
+@@ -4172,7 +4176,8 @@
+         ssi_pfn_register("fsize", handle_fsize);
+         ssi_pfn_register("config", handle_config);
+         ssi_pfn_register("comment", handle_comment);
+-        ssi_pfn_register("include", handle_include);
++        ssi_pfn_register("include", handle_include_counter);
++        ssi_pfn_register("counter", handle_counter);
+         ssi_pfn_register("flastmod", handle_flastmod);
+         ssi_pfn_register("printenv", handle_printenv);
+     }
+@@ -4180,7 +4185,7 @@
+     return OK;
+ }
+ 
+-static const command_rec includes_cmds[] =
++static const command_rec includes_counter_cmds[] =
+ {
+     AP_INIT_TAKE1("XBitHack", set_xbithack, NULL, OR_OPTIONS,
+                   "Off, On, or Full"),
+@@ -4195,44 +4200,44 @@
+     AP_INIT_TAKE1("SSIUndefinedEcho", set_undefined_echo, NULL, OR_ALL,
+                   "String to be displayed if an echoed variable is undefined"),
+     AP_INIT_FLAG("SSILegacyExprParser", ap_set_flag_slot_char,
+-                  (void *)APR_OFFSETOF(include_dir_config, legacy_expr),
++                  (void *)APR_OFFSETOF(include_counter_dir_config, legacy_expr),
+                   OR_LIMIT,
+                   "Whether to use the legacy expression parser compatible "
+                   "with <= 2.2.x. Limited to 'on' or 'off'"),
+     AP_INIT_FLAG("SSILastModified", ap_set_flag_slot_char,
+-                  (void *)APR_OFFSETOF(include_dir_config, lastmodified),
++                  (void *)APR_OFFSETOF(include_counter_dir_config, lastmodified),
+                   OR_LIMIT, "Whether to set the last modified header or respect "
+                   "an existing header. Limited to 'on' or 'off'"),
+     AP_INIT_FLAG("SSIEtag", ap_set_flag_slot_char,
+-                  (void *)APR_OFFSETOF(include_dir_config, etag),
++                  (void *)APR_OFFSETOF(include_counter_dir_config, etag),
+                   OR_LIMIT, "Whether to allow the generation of ETags within the server. "
+                   "Existing ETags will be preserved. Limited to 'on' or 'off'"),
+     {NULL}
+ };
+ 
+-static void ap_register_include_handler(char *tag, include_handler_fn_t *func)
++static void ap_register_include_counter_handler(char *tag, include_counter_handler_fn_t *func)
+ {
+-    apr_hash_set(include_handlers, tag, strlen(tag), (const void *)func);
++    apr_hash_set(include_counter_handlers, tag, strlen(tag), (const void *)func);
+ }
+ 
+ static void register_hooks(apr_pool_t *p)
+ {
+-    APR_REGISTER_OPTIONAL_FN(ap_ssi_get_tag_and_value);
+-    APR_REGISTER_OPTIONAL_FN(ap_ssi_parse_string);
+-    APR_REGISTER_OPTIONAL_FN(ap_register_include_handler);
+-    ap_hook_post_config(include_post_config, NULL, NULL, APR_HOOK_REALLY_FIRST);
+-    ap_hook_fixups(include_fixup, NULL, NULL, APR_HOOK_LAST);
+-    ap_register_output_filter("INCLUDES", includes_filter, includes_setup,
++    APR_REGISTER_OPTIONAL_FN(ap_ssic_get_tag_and_value);
++    APR_REGISTER_OPTIONAL_FN(ap_ssic_parse_string);
++    APR_REGISTER_OPTIONAL_FN(ap_register_include_counter_handler);
++    ap_hook_post_config(include_counter_post_config, NULL, NULL, APR_HOOK_REALLY_FIRST);
++    ap_hook_fixups(include_counter_fixup, NULL, NULL, APR_HOOK_LAST);
++    ap_register_output_filter("INCLUDES", includes_counter_filter, includes_counter_setup,
+                               AP_FTYPE_RESOURCE);
+ }
+ 
+-AP_DECLARE_MODULE(include) =
++AP_DECLARE_MODULE(include_counter) =
+ {
+     STANDARD20_MODULE_STUFF,
+-    create_includes_dir_config,   /* dir config creater */
++    create_includes_counter_dir_config,   /* dir config creater */
+     merge_includes_dir_config,    /* dir config merger */
+-    create_includes_server_config,/* server config */
++    create_includes_counter_server_config,/* server config */
+     NULL,                         /* merge server config */
+-    includes_cmds,                /* command apr_table_t */
++    includes_counter_cmds,                /* command apr_table_t */
+     register_hooks                /* register hooks */
+ };

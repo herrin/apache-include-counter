@@ -1,0 +1,1 @@
+LoadModule include_counter_module /usr/lib/apache2/modules/mod_include_counter.so

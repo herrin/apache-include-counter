@@ -1,0 +1,13 @@
+debian/.debhelper/
+debian/examples/
+debian/source/
+build-stamp
+debian/apache-suexecuser.substvars
+debian/apache-suexecuser/
+debian/files
+*.o
+*.lo
+*.so
+*.slo
+c/.libs
+c/strlwr
