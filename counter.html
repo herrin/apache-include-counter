@@ -1,0 +1,222 @@
+<!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML//EN">
+<HTML>
+<HEAD>
+<TITLE>Web Page Hit Counter</TITLE>
+<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+</HEAD>
+
+<BODY bgcolor="#ffffff" text="#000000" link="#0000ff" vlink="#bf007f">
+<H1 ALIGN=CENTER>Web Page Hit Counter<HR></H1>
+
+<p>This is a <a
+href="https://httpd.apache.org/docs/2.4/mod/mod_include.html">server 
+side include</a> "counter" function, built in to the Apache httpd
+server.</p>
+
+<hr>
+
+<h2>How to set it up </h2>
+
+<h3>First, turn your HTML document into a SHTML document. </h3>
+
+<p>The first thing you have to do is adjust the filename
+extension of your web page so that the server recognizes it as
+containing server-side includes. Just change the extension to
+.shtml. So, for instance, if your web page was named "<samp>index.html</samp>"
+or "<samp>index.htm</samp>", your new web page should
+be named "<samp>index.shtml</samp>". (Other valid
+extensions for server-side include HTML documents on the Why? InterNetworking
+web server are: "<samp>-s.html</samp>" and "<samp>-s.htm</samp>".)</p>
+
+<h3>Next, create a file to hold the value of the counter. </h3>
+
+<p>The first thing you have to do is create a file to hold the
+value of the counter. This is an ASCII text file which contains
+one line on which the the counter value is stored. This file must
+always have the extension ".<samp>cnt</samp>". The file
+can begin with any name, but we recommend that you use the same
+base name as the .shtml file you intend to use it in. So, if your
+web page was named, "<samp>index.shtml</samp>," then
+name the counter file, "<samp>index.cnt</samp>". Put
+this file on the server, with one line containing the number you
+want the counter to start at.</p>
+
+<p>When you put the counter file on the server, it must have
+special "access permissions." It must be set read/write
+by user, group, and other so that the HTTP server can read and
+update it. You can use the chmod command to do this from your FTP
+program or from the Unix shell prompt. </p>
+
+<h3>Finally, add the counter to your SHTML document. </h3>
+
+<p>Add the counter directive in your web page where you want the
+counter to appear. This directive looks like a HTML comment. In
+its simplest form, its "<samp>&lt;!--#counter
+file="filename" --&gt;</samp>". Filename should be
+the base name of the counter file, without the ".cnt"
+extension. So, if your counter file is named
+"counter.cnt", the counter directive you would use is
+"<samp>&lt;!--#counter file="counter" --&gt;</samp>".
+There you go, you now have a counter in your page. Bring up
+Netscape and try it out!</p>
+
+<hr>
+
+<h2>Advanced Options: </h2>
+
+<p>You can do quite a bit more with the counter than just add one
+to it for each hit. You can keep track of page hits silently,
+adjust the appearance of the counter, and even do things like
+rotating your home page through several backgrounds. Here is the
+list of options you can give the counter directive:</p>
+
+<p><font color="#804000"><samp>&lt;!--#counter
+silent="no" width="0" nocommas="no"
+min="0" max="2147000000"
+rollover="no" increment="1"
+ith="no" gfx="#" file="counter"
+include="file%i.html" debug="" --&gt;</samp></font></p>
+
+<p>Where: </p>
+
+<ul>
+    <li><font color="#FF0000"><samp>silent:</samp></font> Whether
+        or not to show the value of the counter to the person
+        accessing the page. <em>yes</em> - Don't show the counter
+        to the page's accesser. <em>no</em> - Show the counter to
+        the page's accesser (default). </li>
+    <li><font color="#FF0000"><samp>width:</samp></font> The
+        minimum width of the displayed counter (padded with 0's
+        if necessary). </li>
+    <li><font color="#FF0000"><samp>nocommas:</samp></font>
+        Whether or not to insert commas into the number for
+        readability. <em>yes</em> - Don't insert commas. <em>no</em>
+        - insert commas (default). If width is not 0 then no
+        commas are inserted regardless of the setting in
+        nocommas. </li>
+    <li><font color="#FF0000"><samp>max:</samp></font> The
+        maximum number to count to. When the counter reaches this
+        number, its behavior is controlled by rollover. By
+        default the number is near two billion. </li>
+    <li><font color="#FF0000"><samp>min:</samp></font> The
+        minimum number to count down to. When the counter reaches
+        this number, its behavior is controlled by rollover. By
+        default the number is zero. </li>
+    <li><font color="#FF0000"><samp>rollover:</samp></font> When
+        you hit the maximum or minimum allowed number, what do
+        you do? <em>yes</em> - Flip to the other endpoint. I.e.
+        if at max, change to min. If at min, change to max. <em>no</em>
+        - Stop counting. Do not add or subtract any further from
+        the counter. </li>
+    <li><font color="#FF0000"><samp>increment:</samp></font> The
+        number to add to the counter. Default: 1. You may also
+        use the keyword "random" which means that the
+        next value of the counter should be a random number
+        between min and max. </li>
+    <li><font color="#FF0000"><samp>ith:</samp></font> Whether or
+        not to append st, nd, rd, or th as appropriate to the end
+        of the counter (i.e. 1<sup>st</sup>, 2<sup>nd</sup>, 3<sup>rd</sup>,
+        4<sup>th</sup>, and so on.) <em>yes</em> - Add the
+        extension. <em>no</em> - Don't add the extension
+        (default).</li>
+    <li><font color="#FF0000"><samp>gfx:</samp></font> Use
+        graphics (i.e. GIF files) to display the counter number
+        instead of using a text counter. Put the html markup to
+        include the graphics where "#" is the digit to
+        replace. For example, if your counter were at 1,234 and
+        you used the following line: &lt;!--#<samp>counter
+        ith="yes" gfx="&lt;IMG
+        SRC=\"gifs/#.gif\"&gt;"
+        file="counter" --&gt;</samp> then it would be
+        replaced by the html markup: &lt;IMG
+        SRC="gifs/1.gif"&gt;&lt;IMG
+        SRC="gifs/,.gif"&gt;&lt;IMG
+        SRC="gifs/2.gif"&gt;&lt;IMG
+        SRC="gifs/3.gif"&gt;&lt;IMG
+        SRC="gifs/4.gif"&gt;</li>
+    <li><font color="#FF0000"><samp>file:</samp></font> The name
+        of the file (minus the .<samp>cnt</samp> extension) to
+        store the counter in. (For example, if your filename is
+        "home.cnt" then you should use
+        file="home".) <strong>Warning:</strong> the
+        "file" directive must come <em>after</em>
+        everything except include and debug.</li>
+    <li><font color="#FF0000"><samp>include:</samp></font> The
+        "base" filename (where %i is the counter) of a
+        file to include in to the document based on the value of
+        the counter. (For example, if you want to include
+        pageX.html where X is the value of the counter, use
+        include="page%i.html".) </li>
+    <li><font color="#FF0000"><samp>debug</samp>,</font> if it
+        exists, means print out the internal variables at the
+        point in the command to assist in figuring out why the
+        counter isn't working. This is provided for expert
+        users... If you don't understand what its saying, don't
+        use it.</li>
+</ul>
+
+<p>Oh yeah. By the way, you are the <strong><!--#counter ith="" file="counter" --></strong> person to
+read this page.</p>
+
+<p>Enjoy!</p>
+
+<hr width="75%">
+
+<h2>Suggested Uses:</h2>
+
+<h3>Basic hit counter</h3>
+
+<p><em>Add this to your web document:</em><br>
+<samp>Welcome, you are the &lt;strong&gt;&lt;!--#counter
+ith="yes" file="counter"
+--&gt;&lt;/strong&gt; person to access this web page.</samp></p>
+
+<p><em>And create the counter.cnt file. It looks like:</em><br>
+Welcome, you are the <strong>1,234,567</strong><sup><strong>th</strong></sup>
+person to access this web page.</p>
+
+<hr width="75%">
+
+<h2>Revision History</h2>
+
+<h3>v2.4</h3>
+
+<ul>
+    <li>Updated to Apache 2.4</li>
+</ul>
+
+<h3>vA1.1.1-2</h3>
+
+<ul>
+    <li>Added yes/no and 1/0 as valid in addition to true/false</li>
+</ul>
+
+<h3>vA1.1.1-1</h3>
+
+<ul>
+    <li>Added "gfx" option. </li>
+    <li>Upgraded to function with Apache 1.1.1 </li>
+</ul>
+
+<h3>v1.5.1-1</h3>
+
+<ul>
+    <li>Added "random" setting to increment option </li>
+    <li>Added "yes/no" options for all tags. Previously
+        the existance of the tag with nothing in the quotes meant
+        do the opposite of the default. This action is preserved
+        for backward compatibility. </li>
+    <li>Upgraded to function with NCSA httpd 1.5.1 </li>
+</ul>
+
+<h3>v1.5a-1</h3>
+
+<ul>
+    <li>Added "ith" option. </li>
+    <li>Upgraded to function with NCSA httpd 1.5a </li>
+</ul>
+
+<P><HR><A HREF="<!--#echo var="HTTP_REFERER" -->"><IMG  WIDTH=70 HEIGHT=35 SRC="../inline/p2back.gif" ALT="[Go Back]" BORDER="0" ALIGN=MIDDLE></A><A HREF="../rates/"><IMG  WIDTH=105 HEIGHT=35 SRC="../inline/p3rates.gif" ALT="[Rates]" BORDER="0" ALIGN=MIDDLE></A><A HREF="../"><IMG  WIDTH=105 HEIGHT=35 SRC="../inline/p3why.gif" ALT="[Why?]" BORDER="0" ALIGN=MIDDLE></A><A HREF="http://www.eff.org/blueribbon.html"><IMG BORDER=0  WIDTH=35 HEIGHT=35 SRC="../inline/p1bluerb.gif" ALT="[EFF]" align="middle"></A></P>
+
+</BODY>
+</HTML>

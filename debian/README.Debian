@@ -1,14 +1,1 @@
-apache-include-counter for Debian
------------------
-
-build with dpkg-buildpackage
-<possible notes regarding this package - if none, delete this file>
-
-cd c
-cp filters/mod_include.h filters/mod_include.c .
-cp mod_include.c mod_include_counter.c
-cp mod_include.h mod_include_counter.h
-patch -p0 < mod_include_counter.h.diff
-patch -p0 < mod_include_counter.c.diff
-
- -- William Herrin <herrin@dirtside.com>  Mon, 07 Jan 2013 11:15:38 -0500
+README
