@@ -21,3 +21,14 @@ install: all
 
 clean:
 	dpkg-buildpackage -rfakeroot -Tclean
+
+# Note: builddeps must be run as root since it installs the dependencies
+# needed to build the package
+builddeps:
+	sudo apt-get update
+	sudo DEBIAN_FRONTEND=noninteractive mk-build-deps --install \
+	  debian/control --remove \
+	  --tool='apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends --yes'
+	sudo rm -f *.buildinfo *.changes
+
+
